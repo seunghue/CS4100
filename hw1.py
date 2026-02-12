@@ -66,15 +66,10 @@ start = time.time()  # <- do not modify this.
 ##########################################
 
 
-# ----------------------------
-# Helper functions (agent-side)
-# ----------------------------
-
-# Add near the top of YOUR CODE HERE (you already import numpy; make sure random is imported too)
 import random
 
 # ----------------------------
-# Helper functions (agent-side)
+# Helper functions
 # ----------------------------
 
 def export_state():
@@ -93,13 +88,11 @@ def count_adj_conflicts(g: np.ndarray) -> int:
                 c += 1
     return c
 
-# --- NEW: shape areas + big-shape incentive ---
 SHAPE_AREAS = {0: 1, 1: 2, 2: 2, 3: 4, 4: 4, 5: 4, 6: 4, 7: 3, 8: 3}
 BIG_SHAPES = [3, 4, 5, 6]
 SMALL_SHAPES = [0, 1, 2, 7, 8]
 
 def shape_cost(placed_shapes: list) -> float:
-    # cheaper cost for larger shapes => incentivizes shapes 3/4/5/6
     return sum(1.0 / SHAPE_AREAS[s[0]] for s in placed_shapes)
 
 def score_state(g: np.ndarray, placed_shapes: list) -> float:
@@ -107,23 +100,20 @@ def score_state(g: np.ndarray, placed_shapes: list) -> float:
     conflicts = count_adj_conflicts(g)
     used_colors = len(set(int(v) for v in g.flatten() if v != -1))
 
-    # correctness >> filling >> efficiency
     return (
         10000 * conflicts
         + 250 * empties
         + 20 * used_colors
-        + 50 * shape_cost(placed_shapes)   # <-- big shapes cheaper
+        + 50 * shape_cost(placed_shapes)
     )
 
-# --- NEW: macro->micro schedule ---
 def pick_shape_idx(grid: np.ndarray) -> int:
     empties = int(np.sum(grid == -1))
     n = grid.shape[0]
     total = n * n
-    fill_progress = 1.0 - (empties / total)  # 0 early -> 1 late
+    fill_progress = 1.0 - (empties / total)
 
-    # Early: prefer big shapes heavily; late: shift toward small shapes
-    p_big = 0.85 - 0.60 * fill_progress  # from ~0.85 down to ~0.25
+    p_big = 0.85 - 0.60 * fill_progress
 
     if random.random() < p_big:
         return random.choice(BIG_SHAPES)
@@ -195,7 +185,7 @@ def restart_by_undoing_all():
         game.execute("undo")
 
 # ----------------------------
-# First-choice hill climbing
+# First-choice local search
 # ----------------------------
 
 MAX_TRIES_PER_STEP = 60
@@ -203,47 +193,31 @@ STUCK_LIMIT = 400
 timelimitsec = 30
 stuck = 0
 
-iteration = 0
-while (time.time() - start < timelimitsec):
+while time.time() - start < timelimitsec:
     shapePos, curS, curC, grid, placedShapes, done = export_state()
     if done:
         break
 
     cur_score = score_state(grid, placedShapes)
-    iteration += 1
-    if iteration % 200 == 0:
-        _, _, _, g_dbg, ps_dbg, done_dbg = export_state()
-        print("iter", iteration, "| shapes", len(ps_dbg), "| empties", int(np.sum(g_dbg == -1)), "| done", done_dbg, flush=True)
-
-
     improved = False
 
     for _ in range(MAX_TRIES_PER_STEP):
-        for _ in range(MAX_TRIES_PER_STEP):
-            n = grid.shape[0]
-            
-            s_idx = pick_shape_idx(grid)
-            shape_arr = game.shapes[s_idx]
+        n = grid.shape[0]
 
-    # choose a valid anchor position for this shape
-            h, w = shape_arr.shape
-            x = random.randint(0, n - w)
-            y = random.randint(0, n - h)
-        
-        # --- CHANGED: pick shape with macro->micro bias ---
         s_idx = pick_shape_idx(grid)
         shape_arr = game.shapes[s_idx]
+        h, w = shape_arr.shape
+        x = random.randint(0, n - w)
+        y = random.randint(0, n - h)
 
         if not game.canPlace(grid, shape_arr, (x, y)):
             continue
 
         cells = covered_cells(shape_arr, (x, y))
 
-        # skip if it doesn't paint any empty cells
         if all(grid[cy, cx] != -1 for (cx, cy) in cells):
             continue
 
-        # color choice: still local heuristic
         c_idx = best_color_for_placement(grid, cells)
 
         move_brush_to(x, y)
@@ -271,18 +245,8 @@ while (time.time() - start < timelimitsec):
         if stuck >= STUCK_LIMIT:
             restart_by_undoing_all()
             stuck = 0
-    shapePos, curS, curC, grid, placedShapes, done = export_state()
-    print("Finished. done =", done, "shapes =", len(placedShapes), "empties =", int(np.sum(grid == -1)))
-
-
-
-
-'''
-
-YOUR CODE HERE
-
-
-'''
+shapePos, currentShapeIndex, currentColorIndex, grid, placedShapes, done = export_state()
+print("Finished. done =", done, "shapes =", len(placedShapes), "empties =", int(np.sum(grid == -1)))
 
 
 
