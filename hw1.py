@@ -28,8 +28,8 @@ np.savetxt('initial_grid.txt', grid, fmt="%d")
 
 # currentColorIndex is the index of the current color being placed (order specified in gridgame.py, and assignment instructions).
 
-# grid represents the current state of the board. 
-    
+# grid represents the current state of the board.
+
     # -1 indicates an empty cell
     # 0 indicates a cell colored in the first color (indigo by default)
     # 1 indicates a cell colored in the second color (taupe by default)
@@ -37,8 +37,8 @@ np.savetxt('initial_grid.txt', grid, fmt="%d")
     # 3 indicates a cell colored in the fourth color (peach by default)
 
 # placedShapes is a list of shapes that have currently been placed on the board.
-    
-    # Each shape is represented as a list containing three elements: a) the brush type (number between 0-8), 
+
+    # Each shape is represented as a list containing three elements: a) the brush type (number between 0-8),
     # b) the location of the shape (coordinates of top-left cell of the shape) and c) color of the shape (number between 0-3)
 
     # For instance [0, (0,0), 2] represents a shape spanning a single cell in the color 2=veridian, placed at the top left cell in the grid.
@@ -62,89 +62,50 @@ start = time.time()  # <- do not modify this.
 
 
 ##########################################
-# Write all your code in the area below. 
+# Write all your code in the area below.
 ##########################################
 
 
 import random
+import math
 
-# ----------------------------
-# Helper functions
-# ----------------------------
+# LLM use disclosure: I used an LLM to help brainstorm and polish this first-choice local search strategy.
+# I reviewed and adapted the generated ideas/code to ensure it follows the assignment constraints.
+
 
 def export_state():
     return game.execute("export")
 
-def count_adj_conflicts(g: np.ndarray) -> int:
-    n = g.shape[0]
-    c = 0
-    for y in range(n):
-        for x in range(n):
-            if g[y, x] == -1:
-                continue
-            if x + 1 < n and g[y, x + 1] == g[y, x]:
-                c += 1
-            if y + 1 < n and g[y + 1, x] == g[y, x]:
-                c += 1
-    return c
-
-SHAPE_AREAS = {0: 1, 1: 2, 2: 2, 3: 4, 4: 4, 5: 4, 6: 4, 7: 3, 8: 3}
-BIG_SHAPES = [3, 4, 5, 6]
-SMALL_SHAPES = [0, 1, 2, 7, 8]
-
-def shape_cost(placed_shapes: list) -> float:
-    return sum(1.0 / SHAPE_AREAS[s[0]] for s in placed_shapes)
-
-def score_state(g: np.ndarray, placed_shapes: list) -> float:
-    empties = int(np.sum(g == -1))
-    conflicts = count_adj_conflicts(g)
-    used_colors = len(set(int(v) for v in g.flatten() if v != -1))
-
-    return (
-        10000 * conflicts
-        + 250 * empties
-        + 20 * used_colors
-        + 50 * shape_cost(placed_shapes)
-    )
-
-def pick_shape_idx(grid: np.ndarray) -> int:
-    empties = int(np.sum(grid == -1))
-    n = grid.shape[0]
-    total = n * n
-    fill_progress = 1.0 - (empties / total)
-
-    p_big = 0.85 - 0.60 * fill_progress
-
-    if random.random() < p_big:
-        return random.choice(BIG_SHAPES)
-    return random.choice(SMALL_SHAPES)
 
 def move_brush_to(target_x: int, target_y: int):
-    shapePos, curS, curC, g, ps, done = export_state()
-    x, y = shapePos[0], shapePos[1]
+    shape_pos, _, _, _, _, _ = export_state()
+    x, y = shape_pos[0], shape_pos[1]
 
     while x < target_x:
-        shapePos, curS, curC, g, ps, done = game.execute("right")
-        x = shapePos[0]
+        shape_pos, _, _, _, _, _ = game.execute("right")
+        x = shape_pos[0]
     while x > target_x:
-        shapePos, curS, curC, g, ps, done = game.execute("left")
-        x = shapePos[0]
+        shape_pos, _, _, _, _, _ = game.execute("left")
+        x = shape_pos[0]
     while y < target_y:
-        shapePos, curS, curC, g, ps, done = game.execute("down")
-        y = shapePos[1]
+        shape_pos, _, _, _, _, _ = game.execute("down")
+        y = shape_pos[1]
     while y > target_y:
-        shapePos, curS, curC, g, ps, done = game.execute("up")
-        y = shapePos[1]
+        shape_pos, _, _, _, _, _ = game.execute("up")
+        y = shape_pos[1]
+
 
 def set_shape(target_shape_idx: int):
-    shapePos, curS, curC, g, ps, done = export_state()
-    while curS != target_shape_idx:
-        shapePos, curS, curC, g, ps, done = game.execute("switchshape")
+    _, cur_shape, _, _, _, _ = export_state()
+    while cur_shape != target_shape_idx:
+        _, cur_shape, _, _, _, _ = game.execute("switchshape")
+
 
 def set_color(target_color_idx: int):
-    shapePos, curS, curC, g, ps, done = export_state()
-    while curC != target_color_idx:
-        shapePos, curS, curC, g, ps, done = game.execute("switchcolor")
+    _, _, cur_color, _, _, _ = export_state()
+    while cur_color != target_color_idx:
+        _, _, cur_color, _, _, _ = game.execute("switchcolor")
+
 
 def covered_cells(shape_arr: np.ndarray, pos):
     cells = []
@@ -154,97 +115,179 @@ def covered_cells(shape_arr: np.ndarray, pos):
                 cells.append((pos[0] + j, pos[1] + i))
     return cells
 
-def best_color_for_placement(g: np.ndarray, cells) -> int:
+
+def adjacent_conflicts_for_color(g: np.ndarray, cells, color_idx: int) -> int:
     n = g.shape[0]
-    best = None
+    conflicts = 0
+    for (x, y) in cells:
+        if x > 0 and g[y, x - 1] == color_idx:
+            conflicts += 1
+        if x + 1 < n and g[y, x + 1] == color_idx:
+            conflicts += 1
+        if y > 0 and g[y - 1, x] == color_idx:
+            conflicts += 1
+        if y + 1 < n and g[y + 1, x] == color_idx:
+            conflicts += 1
+    return conflicts
+
+
+def best_color_for_cells(g: np.ndarray, cells):
+    colors = list(range(4))
+    random.shuffle(colors)
+    best_color = colors[0]
     best_val = 10**9
 
-    for color in range(4):
-        add_conf = 0
-        for (x, y) in cells:
-            if x > 0 and g[y, x - 1] == color:
-                add_conf += 1
+    for color in colors:
+        val = adjacent_conflicts_for_color(g, cells, color)
+        if val < best_val:
+            best_val = val
+            best_color = color
+
+    return best_color, best_val
+
+
+def count_adj_conflicts(g: np.ndarray) -> int:
+    n = g.shape[0]
+    conflicts = 0
+    for y in range(n):
+        for x in range(n):
+            color = g[y, x]
+            if color == -1:
+                continue
             if x + 1 < n and g[y, x + 1] == color:
-                add_conf += 1
-            if y > 0 and g[y - 1, x] == color:
-                add_conf += 1
+                conflicts += 1
             if y + 1 < n and g[y + 1, x] == color:
-                add_conf += 1
+                conflicts += 1
+    return conflicts
 
-        if add_conf < best_val:
-            best_val = add_conf
-            best = color
 
-    return best if best is not None else 0
+def score_state(g: np.ndarray, placed_shapes: list) -> float:
+    empties = int(np.sum(g == -1))
+    conflicts = count_adj_conflicts(g)
+    colors_used = len(set(int(v) for v in g.flatten() if v != -1))
+
+    # Strongly prioritize validity, then completion, then mild shape/color minimization.
+    return 30000 * conflicts + 350 * empties + 4 * len(placed_shapes) + 8 * colors_used
+
 
 def restart_by_undoing_all():
     while True:
-        shapePos, curS, curC, g, ps, done = export_state()
-        if len(ps) == 0:
+        _, _, _, _, ps, _ = export_state()
+        if not ps:
             return
         game.execute("undo")
 
-# ----------------------------
-# First-choice local search
-# ----------------------------
 
-MAX_TRIES_PER_STEP = 60
-STUCK_LIMIT = 400
-timelimitsec = 30
-stuck = 0
+def random_candidate(g: np.ndarray):
+    n = g.shape[0]
 
-while time.time() - start < timelimitsec:
-    shapePos, curS, curC, grid, placedShapes, done = export_state()
+    # Prefer larger sparse shapes early; bias toward 1x1 near the end for guaranteed closure.
+    empties = int(np.sum(g == -1))
+    progress = 1.0 - (empties / (n * n))
+
+    if random.random() < 0.20 + 0.65 * progress:
+        shape_idx = 0
+    else:
+        shape_idx = random.choice([1, 2, 3, 4, 5, 6, 7, 8])
+
+    shape_arr = game.shapes[shape_idx]
+    h, w = shape_arr.shape
+    x = random.randint(0, n - w)
+    y = random.randint(0, n - h)
+
+    return shape_idx, shape_arr, (x, y)
+
+
+def force_single_cell_progress(g: np.ndarray):
+    empties = list(zip(*np.where(g == -1)))
+    if not empties:
+        return
+
+    y, x = random.choice(empties)
+    chosen_color, _ = best_color_for_cells(g, [(x, y)])
+
+    move_brush_to(x, y)
+    set_shape(0)
+    set_color(chosen_color)
+    game.execute("place")
+
+
+MAX_NEIGHBORS_PER_STEP = 120
+MAX_STUCK_STEPS = 140
+MAX_RESTARTS = 14
+time_limit_sec = 80
+
+stuck_steps = 0
+restarts = 0
+iteration = 0
+
+while time.time() - start < time_limit_sec:
+    shapePos, cur_shape, cur_color, grid, placedShapes, done = export_state()
     if done:
         break
 
-    cur_score = score_state(grid, placedShapes)
-    improved = False
+    current_score = score_state(grid, placedShapes)
+    accepted = False
 
-    for _ in range(MAX_TRIES_PER_STEP):
-        n = grid.shape[0]
+    # Decaying temperature for occasional uphill moves.
+    temperature = max(0.35, 2.8 * math.exp(-iteration / 900.0))
 
-        s_idx = pick_shape_idx(grid)
-        shape_arr = game.shapes[s_idx]
-        h, w = shape_arr.shape
-        x = random.randint(0, n - w)
-        y = random.randint(0, n - h)
+    for _ in range(MAX_NEIGHBORS_PER_STEP):
+        shape_idx, shape_arr, (x, y) = random_candidate(grid)
 
         if not game.canPlace(grid, shape_arr, (x, y)):
             continue
 
         cells = covered_cells(shape_arr, (x, y))
-
-        if all(grid[cy, cx] != -1 for (cx, cy) in cells):
+        if not any(grid[cy, cx] == -1 for (cx, cy) in cells):
             continue
 
-        c_idx = best_color_for_placement(grid, cells)
+        color_idx, _ = best_color_for_cells(grid, cells)
 
         move_brush_to(x, y)
-        set_shape(s_idx)
-        set_color(c_idx)
+        set_shape(shape_idx)
+        set_color(color_idx)
 
         prev_len = len(placedShapes)
-        shapePos2, curS2, curC2, grid2, placedShapes2, done2 = game.execute("place")
-
-        if len(placedShapes2) == prev_len:
+        _, _, _, grid2, placed2, done2 = game.execute("place")
+        if len(placed2) == prev_len:
             continue
 
-        new_score = score_state(grid2, placedShapes2)
+        new_score = score_state(grid2, placed2)
+        delta = new_score - current_score
 
-        if new_score < cur_score:
-            improved = True
+        if delta <= 0:
+            accepted = True
             break
-        else:
-            game.execute("undo")
 
-    if improved:
-        stuck = 0
+        # First-choice local search with stochastic acceptance of some worse neighbors.
+        accept_prob = math.exp(-delta / (180.0 * temperature))
+        if random.random() < accept_prob:
+            accepted = True
+            break
+
+        game.execute("undo")
+
+    if accepted:
+        stuck_steps = 0
     else:
-        stuck += 1
-        if stuck >= STUCK_LIMIT:
+        stuck_steps += 1
+
+        # Ensure monotonic progress when sampling gets unlucky.
+        if stuck_steps % 8 == 0:
+            _, _, _, g_now, _, done_now = export_state()
+            if not done_now and np.any(g_now == -1):
+                force_single_cell_progress(g_now)
+
+        if stuck_steps >= MAX_STUCK_STEPS:
+            restarts += 1
+            if restarts > MAX_RESTARTS:
+                break
             restart_by_undoing_all()
-            stuck = 0
+            stuck_steps = 0
+
+    iteration += 1
+
 shapePos, currentShapeIndex, currentColorIndex, grid, placedShapes, done = export_state()
 print("Finished. done =", done, "shapes =", len(placedShapes), "empties =", int(np.sum(grid == -1)))
 
@@ -254,7 +297,7 @@ print("Finished. done =", done, "shapes =", len(placedShapes), "empties =", int(
 
 ########################################
 
-# Do not modify any of the code below. 
+# Do not modify any of the code below.
 
 ########################################
 
